@@ -26,6 +26,7 @@ def load_variants(vcf_reader):
 
     heterozigous = 0
     multiallelicsite = 0
+    ref_hom = 0
     total = 0
     for r in vcf_reader:
         variant_key = f"{r.chrom}:{r.pos} {r.ref} {r.alts}"
@@ -35,11 +36,13 @@ def load_variants(vcf_reader):
             continue
 
         gt = r.samples[sample_name]["GT"]
-        if gt == (0,):
+        if gt == (0,) or gt == (None, ):
+            ref_hom += 1
             continue
 
         if len(gt) != 1:
-            if gt == (0, 0):
+            if gt == (0, 0) or gt == (None, None):
+                ref_hom += 1
                 continue
             if gt[0] != gt[1]:
                 heterozigous += 1
@@ -52,6 +55,7 @@ def load_variants(vcf_reader):
         raise ValueError("No variants found in the VCF file")
 
     logging.info(f"  Total variants: {total}")
+    logging.info(f"  Dropped because reference homozygous: {ref_hom}")
     logging.info(f"  Dropped because more than one alternative allele: {multiallelicsite}")
     logging.info(f"  Dropped because heterozigous genotypes: {heterozigous}")
     return sample_name, result
@@ -175,6 +179,7 @@ def main(path_1, path_2, sample_name, output_name):
             elif genotype == (0, 1) or genotype == (1, 0):
                 heterozigous += 1
             else:
+                logging.error("Unexpected genotype at position %s %s: %s",  original_record[0].contig, original_record[0].pos, genotype)
                 raise ValueError("Unexpected genotype")
 
             # we junst want positions, ref, alt, so we can get the first original record
