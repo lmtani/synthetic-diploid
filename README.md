@@ -4,7 +4,7 @@
 
 ## Description
 
-This script takes two VCF files (one for each haplotype) and creates a new VCF file with a synthetic diploid genome.
+This script takes two VCF files (one for each haploid) and creates a new VCF file with a synthetic diploid genome.
 
 ### Limitations
 
