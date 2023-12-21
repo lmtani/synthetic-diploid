@@ -1,9 +1,10 @@
 import pysam
 import sys
 import coloredlogs, logging
-logging.basicConfig(level=logging.INFO)
-logging.basicConfig(format='%(asctime)s %(message)s', datefmt='%m/%d/%Y %I:%M:%S %p')
-coloredlogs.install(level=logging.INFO)
+coloredlogs.install(
+    level=logging.INFO,
+    fmt='%(asctime)s,%(msecs)03d %(hostname)s %(levelname)s %(message)s'
+)
 
 SAMPLE_1 = 0
 SAMPLE_2 = 1
@@ -16,18 +17,18 @@ def load_variants(vcf_reader):
     result = {}
     logging.info(f"📦 Loading variants from {vcf_reader.filename}")
     sample_names = [s for s in vcf_reader.header.samples]
-    logging.info(f"  Samples: {' '.join(sample_names)}")
+    logging.info(f"  Sample: {' '.join(sample_names)}")
     if len(sample_names) > 1:
         raise ValueError("More than one sample found in the same VCF file. Only single sample VCFs are supported")
     sample_name = sample_names[0]
 
     heterozigous = 0
     multiallelicsite = 0
-    diploid_warning = False
+    total = 0
     for r in vcf_reader:
         variant_key = f"{r.chrom}:{r.pos} {r.ref} {r.alts}"
+        total += 1
         if len(r.alts) > 1:
-            logging.warning("  Skipping this variant because it has more than one alternative allele: %s", variant_key)
             multiallelicsite += 1
             continue
 
@@ -48,6 +49,7 @@ def load_variants(vcf_reader):
     if not result:
         raise ValueError("No variants found in the VCF file")
 
+    logging.info(f"  Total variants: {total}")
     logging.info(f"  Dropped because more than one alternative allele: {multiallelicsite}")
     logging.info(f"  Dropped because heterozigous genotypes: {heterozigous}")
     return sample_name, result
@@ -125,25 +127,25 @@ def haploid_sanity_check(hap1, hap2):
             raise ValueError("We don't support heterozigoud diploid VCFs")
 
 
-def create_vcf_record(original_variant, oq, dp, gt, joined_samples):
+def create_vcf_record(new_header, original_variant, oq, dp, gt, joined_samples, sample_name):
     logging.debug("Creating VCF record")
     logging.debug("GT: %s", gt)
     logging.debug("OQ: %s", oq)
     logging.debug("DP: %s", dp)
     logging.debug("Samples: %s", joined_samples)
-    r = header.new_record()
+    r = new_header.new_record()
     r.contig = str(original_variant.chrom)
     r.pos = int(original_variant.pos)
     r.id = original_variant.id
     r.ref = original_variant.ref
     r.alts = original_variant.alts
-    new_qualities = min(original_qualities)
+    new_qualities = min(oq)
     r.qual = max(oq) if gt != (1, 1) else new_qualities  # if variant only in one sample, we use the original quality because zero is attributed to the other sample
     r.info["SAMPLES"] = joined_samples
-    r.samples[synthetic_sample_name]["OQ"] = oq
-    r.samples[synthetic_sample_name]['SD'] = dp
-    r.samples[synthetic_sample_name]['GT'] = gt
-    r.samples[synthetic_sample_name].phased = True
+    r.samples[sample_name]["OQ"] = oq
+    r.samples[sample_name]['SD'] = dp
+    r.samples[sample_name]['GT'] = gt
+    r.samples[sample_name].phased = True
     return r
 
 
@@ -187,7 +189,7 @@ if __name__ == "__main__":
 
             # we junst want positions, ref, alt, so we can get the first original record
             record = create_vcf_record(
-                original_record[0], original_qualities, read_depth, genotype, samples
+                header, original_record[0], original_qualities, read_depth, genotype, samples, synthetic_sample_name
             )
 
             vcf_out.write(record)
