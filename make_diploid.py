@@ -24,12 +24,13 @@ def load_variants(vcf_reader):
         raise ValueError("More than one sample found in the same VCF file. Only single sample VCFs are supported")
     sample_name = sample_names[0]
 
+    indels = 0
+    snvs = 0
     heterozigous = 0
     multiallelicsite = 0
     ref_hom = 0
     total = 0
     for r in vcf_reader:
-        variant_key = f"{r.chrom}:{r.pos} {r.ref} {r.alts}"
         total += 1
         if len(r.alts) > 1:
             multiallelicsite += 1
@@ -48,6 +49,11 @@ def load_variants(vcf_reader):
                 heterozigous += 1
                 continue
 
+        if len(r.ref) > 1 or len(r.alts[0]) > 1:
+            indels += 1
+        else:
+            snvs += 1
+
         key = (r.chrom, r.pos, r.ref, r.alts[0])
         result.setdefault(key, []).append(r)
 
@@ -55,7 +61,10 @@ def load_variants(vcf_reader):
         raise ValueError("No variants found in the VCF file")
 
     logging.info(f"  Total variants: {total}")
-    logging.info(f"  Dropped because reference homozygous: {ref_hom}")
+    logging.info(f"    - SNVs: {snvs}")
+    logging.info(f"    - Indels: {indels}")
+    logging.info(f"    - Reference homozygous (dropped): {ref_hom}")
+
     logging.info(f"  Dropped because more than one alternative allele: {multiallelicsite}")
     logging.info(f"  Dropped because heterozigous genotypes: {heterozigous}")
     return sample_name, result
@@ -169,6 +178,8 @@ def main(path_1, path_2, sample_name, output_name):
     }
     heterozigous = 0
     homozigous = 0
+    # sort variants by contig and position
+    variants = dict(sorted(variants.items(), key=lambda item: (item[0][0], item[0][1])))
     with pysam.VariantFile(output_name, 'w', header=header) as vcf_out:
         for var in variants:
             original_record = variants[var]
