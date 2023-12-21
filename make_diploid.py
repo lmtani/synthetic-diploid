@@ -149,33 +149,21 @@ def create_vcf_record(new_header, original_variant, oq, dp, gt, joined_samples, 
     return r
 
 
-if __name__ == "__main__":
-    if len(sys.argv) != 3:
-        print("Usage: python make_diploid.py <vcf_file> <vcf_file>")
-        sys.exit(1)
-
-    vcf_path_1 = sys.argv[1]
-    vcf_path_2 = sys.argv[2]
-    synthetic_sample_name = "synthetic-diploid"
-    outfile = "diploid_genotypes.vcf"
-
-    vcf = pysam.VariantFile(vcf_path_1)
-    vcf2 = pysam.VariantFile(vcf_path_2)
-
+def main(path_1, path_2, sample_name, output_name):
+    vcf = pysam.VariantFile(path_1)
+    vcf2 = pysam.VariantFile(path_2)
     sample_name_1, haplotype_1 = load_variants(vcf)
     sample_name_2, haplotype_2 = load_variants(vcf2)
     variants = merge_dictionaries(haplotype_1, haplotype_2)
-    header = create_vcf_header(vcf, synthetic_sample_name)
-
+    header = create_vcf_header(vcf, sample_name)
     haplotype_phase = {
         sample_name_1: lambda n: (n, 0),
         sample_name_2: lambda n: (0, n),
         "both": lambda n, m: (n, m)
     }
-
     heterozigous = 0
     homozigous = 0
-    with pysam.VariantFile(outfile, 'w', header=header) as vcf_out:
+    with pysam.VariantFile(output_name, 'w', header=header) as vcf_out:
         for var in variants:
             original_record = variants[var]
             genotype, original_qualities, read_depth, samples = parse_fields(variants[var], haplotype_phase)
@@ -189,11 +177,25 @@ if __name__ == "__main__":
 
             # we junst want positions, ref, alt, so we can get the first original record
             record = create_vcf_record(
-                header, original_record[0], original_qualities, read_depth, genotype, samples, synthetic_sample_name
+                header, original_record[0], original_qualities, read_depth, genotype, samples, sample_name
             )
 
             vcf_out.write(record)
-
-    logging.info(f"🖫 Wrote {len(variants)} variants to {outfile}")
+    logging.info(f"🖫 Wrote {len(variants)} variants to {output_name}")
     logging.info(f"  Homozigous: {homozigous}")
     logging.info(f"  Heterozigous: {heterozigous}")
+
+    return variants, homozigous, heterozigous
+
+
+if __name__ == "__main__":
+    if len(sys.argv) != 3:
+        print("Usage: python make_diploid.py <vcf_file> <vcf_file>")
+        sys.exit(1)
+
+    vcf_path_1 = sys.argv[1]
+    vcf_path_2 = sys.argv[2]
+    synthetic_sample_name = "synthetic-diploid"
+    outfile = "diploid_genotypes.vcf"
+
+    main(vcf_path_1, vcf_path_2, synthetic_sample_name, outfile)

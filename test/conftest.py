@@ -3,18 +3,33 @@ import pysam
 
 
 @pytest.fixture()
-def vcf_reader_1():
-    return pysam.VariantFile("test/data/SSC39-MAT-1.deepvariant.vcf.gz")
+def vcf_1():
+    return "test/data/SSC39-MAT-1.deepvariant.vcf.gz"
 
 
 @pytest.fixture()
-def vcf_reader_2():
-    return pysam.VariantFile("test/data/SSC39-MAT-2.clair3.vcf.gz")
+def vcf_2():
+    return "test/data/SSC39-MAT-2.clair3.vcf.gz"
 
 
 @pytest.fixture()
-def vcf_reader_multisample():
-    return pysam.VariantFile("test/data/multisample.vcf.gz")
+def vcf_3():
+    return "test/data/multisample.vcf.gz"
+
+
+@pytest.fixture()
+def vcf_reader_1(vcf_1):
+    return pysam.VariantFile(vcf_1)
+
+
+@pytest.fixture()
+def vcf_reader_2(vcf_2):
+    return pysam.VariantFile(vcf_2)
+
+
+@pytest.fixture()
+def vcf_reader_multisample(vcf_3):
+    return pysam.VariantFile(vcf_3)
 
 
 @pytest.fixture()
