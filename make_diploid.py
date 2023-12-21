@@ -19,6 +19,7 @@ def load_variants(vcf_reader):
     logging.info(f"Samples: {' '.join(sample_names)}")
     if len(sample_names) > 1:
         raise ValueError("More than one sample found in the same VCF file. Only single sample VCFs are supported")
+    sample_name = sample_names[0]
 
     diploid_warning = False
     for r in vcf_reader:
@@ -27,10 +28,16 @@ def load_variants(vcf_reader):
             logging.warning("Skipping this variant because it has more than one alternative allele: %s", variant_key)
             continue
 
-        gt = r.samples[sample_names[0]]["GT"]
+        gt = r.samples[sample_name]["GT"]
         if len(gt) != 1:
             if not diploid_warning:
-                logging.warning("Looks like this VCF is not represented as haploid.")
+                logging.warning(
+                    "Looks like this VCF is not represented as haploid. We will try to convert it to haploid."
+                )
+                logging.warning("e.g.:")
+                logging.warning("1/1 -> 1")
+                logging.warning("0/1 -> we will skip")
+                logging.warning("0/0 -> 0")
                 diploid_warning = True
 
             if gt[0] != gt[1]:
@@ -39,7 +46,10 @@ def load_variants(vcf_reader):
 
         key = (r.chrom, r.pos, r.ref, r.alts[0])
         result.setdefault(key, []).append(r)
-    return result
+
+    if not result:
+        raise ValueError("No variants found in the VCF file")
+    return sample_name, result
 
 
 def merge_dictionaries(records_1, records_2):
@@ -75,7 +85,7 @@ def extract_vcf_format_field(sample1, sample2, vars_in_position, field: str):
     return val1, val2
 
 
-def parse_fields(vars_in_position: list):
+def parse_fields(vars_in_position: list, phase: dict):
     if len(vars_in_position) == 2:
         first_sample = 0  # We don't support more than one sample per VCF
         sample1 = vars_in_position[VCF_1].samples.keys()[first_sample]
@@ -86,10 +96,11 @@ def parse_fields(vars_in_position: list):
         dp1, dp2 = extract_vcf_format_field(sample1, sample2, vars_in_position, "DP")
         haploid_sanity_check(hap1, hap2)
 
-        first_gt_field = 0  # We keep only with haploid genotypes or homozigous diploid genotypes, so we can get the first one
-        gt = (hap1[first_gt_field], hap2[first_gt_field])
-        oq = (oq1, oq2)
-        dp = (dp1, dp2)
+        # We keep only with haploid genotypes or homozigous diploid genotypes, so we can get the first one
+        first_gt_field = 0
+        gt = phase["both"](hap1[first_gt_field], hap2[first_gt_field])
+        oq = phase["both"](oq1, oq2)
+        dp = phase["both"](dp1, dp2)
         joined_samples = ",".join(vars_in_position[0].samples.keys() + vars_in_position[1].samples.keys())
     elif len(vars_in_position) == 1:
         logging.info(
@@ -97,9 +108,9 @@ def parse_fields(vars_in_position: list):
         )
 
         sample = vars_in_position[0].samples.keys()[0]
-        gt = (0, vars_in_position[0].samples[sample]["GT"][0])
-        oq = (0, vars_in_position[0].samples[sample]["GQ"])
-        dp = (0, vars_in_position[0].samples[sample]["DP"])
+        gt = phase[sample](vars_in_position[0].samples[sample]["GT"][0])
+        oq = phase[sample](vars_in_position[0].samples[sample]["GQ"])
+        dp = phase[sample](vars_in_position[0].samples[sample]["DP"])
         joined_samples = ",".join(vars_in_position[-1].samples.keys())
     else:
         raise ValueError("More than 2 variants found in the same position")
@@ -117,7 +128,7 @@ def haploid_sanity_check(hap1, hap2):
             raise ValueError("We don't support heterozigoud diploid VCFs")
 
 
-def create_vcf_record(original_variant, new_qual, oq, dp, gt, joined_samples):
+def create_vcf_record(original_variant, oq, dp, gt, joined_samples):
     logging.debug("Creating VCF record")
     logging.debug("GT: %s", gt)
     logging.debug("OQ: %s", oq)
@@ -129,12 +140,13 @@ def create_vcf_record(original_variant, new_qual, oq, dp, gt, joined_samples):
     r.id = original_variant.id
     r.ref = original_variant.ref
     r.alts = original_variant.alts
-    r.qual = new_qual
+    new_qualities = min(original_qualities)
+    r.qual = max(oq) if gt != (1, 1) else new_qualities  # if variant only in one sample, we use the original quality because zero is attributed to the other sample
     r.info["SAMPLES"] = joined_samples
     r.samples[synthetic_sample_name]["OQ"] = oq
     r.samples[synthetic_sample_name]['SD'] = dp
     r.samples[synthetic_sample_name]['GT'] = gt
-    r.samples[synthetic_sample_name].phased = False
+    r.samples[synthetic_sample_name].phased = True
     return r
 
 
@@ -151,20 +163,25 @@ if __name__ == "__main__":
     vcf = pysam.VariantFile(vcf_path_1)
     vcf2 = pysam.VariantFile(vcf_path_2)
 
-    haplotype_1 = load_variants(vcf)
-    haplotype_2 = load_variants(vcf2)
+    sample_name_1, haplotype_1 = load_variants(vcf)
+    sample_name_2, haplotype_2 = load_variants(vcf2)
     variants = merge_dictionaries(haplotype_1, haplotype_2)
     header = create_vcf_header(vcf, synthetic_sample_name)
+
+    haplotype_phase = {
+        sample_name_1: lambda n: (n, 0),
+        sample_name_2: lambda n: (0, n),
+        "both": lambda n, m: (n, m)
+    }
 
     with pysam.VariantFile(outfile, 'w', header=header) as vcf_out:
         for var in variants:
             original_record = variants[var]
-            genotype, original_qualities, read_depth, samples = parse_fields(variants[var])
+            genotype, original_qualities, read_depth, samples = parse_fields(variants[var], haplotype_phase)
 
-            new_qualities = min(original_qualities)
             # we junst want positions, ref, alt, so we can get the first original record
             record = create_vcf_record(
-                original_record[0], new_qualities, original_qualities, read_depth, genotype, samples
+                original_record[0], original_qualities, read_depth, genotype, samples
             )
 
             vcf_out.write(record)
