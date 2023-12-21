@@ -1,5 +1,7 @@
 # Synthetic Diploid Maker
 
+[![codecov](https://codecov.io/gh/lmtani/synthetic-diploid/graph/badge.svg)](https://codecov.io/gh/lmtani/synthetic-diploid)
+
 ## Description
 
 This script takes two VCF files (one for each haplotype) and creates a new VCF file with a synthetic diploid genome.
