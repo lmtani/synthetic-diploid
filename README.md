@@ -7,7 +7,8 @@ This script takes two VCF files (one for each haplotype) and creates a new VCF f
 ### Limitations
 
 * Does not process multisample VCF files
-* Assumes that both VCF files follows the same pattern of variant representation (e.g.: left-aligned, normalized, etc.)
+* Removes reference calls (e.g.: 0/0)
+* Assume that both VCF files follow the same pattern of variant representation (e.g.: left-aligned, normalized, etc.)
 * If a VCF file has diploid representation (e.g.: 0/1), the script will discard positions with heterozygous variants
 
 ## Usage

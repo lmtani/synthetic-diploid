@@ -14,34 +14,32 @@ VCF_2 = 1
 
 def load_variants(vcf_reader):
     result = {}
-    logging.info(f"Loading variants from {vcf_reader.filename}")
+    logging.info(f"📦 Loading variants from {vcf_reader.filename}")
     sample_names = [s for s in vcf_reader.header.samples]
-    logging.info(f"Samples: {' '.join(sample_names)}")
+    logging.info(f"  Samples: {' '.join(sample_names)}")
     if len(sample_names) > 1:
         raise ValueError("More than one sample found in the same VCF file. Only single sample VCFs are supported")
     sample_name = sample_names[0]
 
+    heterozigous = 0
+    multiallelicsite = 0
     diploid_warning = False
     for r in vcf_reader:
         variant_key = f"{r.chrom}:{r.pos} {r.ref} {r.alts}"
         if len(r.alts) > 1:
-            logging.warning("Skipping this variant because it has more than one alternative allele: %s", variant_key)
+            logging.warning("  Skipping this variant because it has more than one alternative allele: %s", variant_key)
+            multiallelicsite += 1
             continue
 
         gt = r.samples[sample_name]["GT"]
-        if len(gt) != 1:
-            if not diploid_warning:
-                logging.warning(
-                    "Looks like this VCF is not represented as haploid. We will try to convert it to haploid."
-                )
-                logging.warning("e.g.:")
-                logging.warning("1/1 -> 1")
-                logging.warning("0/1 -> we will skip")
-                logging.warning("0/0 -> 0")
-                diploid_warning = True
+        if gt == (0,):
+            continue
 
+        if len(gt) != 1:
+            if gt == (0, 0):
+                continue
             if gt[0] != gt[1]:
-                logging.warning(f"Skipping this variant because it can't be represented as haploid: {variant_key}")
+                heterozigous += 1
                 continue
 
         key = (r.chrom, r.pos, r.ref, r.alts[0])
@@ -49,6 +47,9 @@ def load_variants(vcf_reader):
 
     if not result:
         raise ValueError("No variants found in the VCF file")
+
+    logging.info(f"  Dropped because more than one alternative allele: {multiallelicsite}")
+    logging.info(f"  Dropped because heterozigous genotypes: {heterozigous}")
     return sample_name, result
 
 
@@ -103,10 +104,6 @@ def parse_fields(vars_in_position: list, phase: dict):
         dp = phase["both"](dp1, dp2)
         joined_samples = ",".join(vars_in_position[0].samples.keys() + vars_in_position[1].samples.keys())
     elif len(vars_in_position) == 1:
-        logging.info(
-            f"Only one vcf has a variant in this position: {vars_in_position[0].samples.keys()[0]} - {vars_in_position[0].pos}"
-        )
-
         sample = vars_in_position[0].samples.keys()[0]
         gt = phase[sample](vars_in_position[0].samples[sample]["GT"][0])
         oq = phase[sample](vars_in_position[0].samples[sample]["GQ"])
@@ -174,10 +171,19 @@ if __name__ == "__main__":
         "both": lambda n, m: (n, m)
     }
 
+    heterozigous = 0
+    homozigous = 0
     with pysam.VariantFile(outfile, 'w', header=header) as vcf_out:
         for var in variants:
             original_record = variants[var]
             genotype, original_qualities, read_depth, samples = parse_fields(variants[var], haplotype_phase)
+
+            if genotype == (1, 1):
+                homozigous += 1
+            elif genotype == (0, 1) or genotype == (1, 0):
+                heterozigous += 1
+            else:
+                raise ValueError("Unexpected genotype")
 
             # we junst want positions, ref, alt, so we can get the first original record
             record = create_vcf_record(
@@ -185,3 +191,7 @@ if __name__ == "__main__":
             )
 
             vcf_out.write(record)
+
+    logging.info(f"🖫 Wrote {len(variants)} variants to {outfile}")
+    logging.info(f"  Homozigous: {homozigous}")
+    logging.info(f"  Heterozigous: {heterozigous}")
